@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#1A1C1F" />
+<title>Bitácora de Fuerza</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<style>
+  :root{
+    --bg:#17181B; --surface:#1F2226; --surface2:#282C31; --border:#383D43;
+    --text:#E4E6E8; --muted:#8B9096; --accent:#7C93A3; --accent-hover:#93A7B4;
+    --danger:#B25A52; --success:#5F8F73;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;}
+  #root{min-height:100vh;}
+  input,textarea{font-family:inherit;}
+  ::-webkit-scrollbar{height:6px;width:6px;}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+  .display{font-family:'Oswald',sans-serif; text-transform:uppercase;}
+  .mono{font-family:'JetBrains Mono',monospace;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const {useState, useEffect, useRef} = React;
+
+const uid = () => Math.random().toString(36).slice(2,10);
+const EMPTY_SET = () => ({id: uid(), carga:"", reps:"", rir:"", intensidad:""});
+const STORAGE_KEY = "bitacora-fuerza-data";
+
+const defaultData = () => ({
+  ejercicios: [
+    {id: uid(), nombre: "Sentadilla trasera"},
+    {id: uid(), nombre: "Press banca"},
+    {id: uid(), nombre: "Peso muerto"},
+  ],
+  semanas: [
+    {id: uid(), numero: 1, etiqueta: "Acumulación",
+     dias: [{id: uid(), nombre: "Día 1 · Tren inferior", acotacion: "", entradas: []}]}
+  ]
+});
+
+function loadData(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  }catch(e){}
+  return defaultData();
+}
+function saveData(data){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }catch(e){}
+}
+
+function Sparkline({values}){
+  const max = Math.max(1, ...values.map(v=>v||0));
+  return (
+    <div style={{display:"flex", alignItems:"flex-end", gap:3, height:22}}>
+      {values.map((v,i)=>(
+        <div key={i} title={v ? `${v} kg` : "sin dato"}
+          style={{width:5, borderRadius:2, minHeight:3,
+            height:`${v ? Math.max(12,(v/max)*100) : 8}%`,
+            background: v ? "var(--accent)" : "var(--border)"}} />
+      ))}
+    </div>
+  );
+}
+
+function Legend({open,setOpen}){
+  return (
+    <div style={{border:"1px solid var(--border)", borderRadius:10, background:"var(--surface)", overflow:"hidden"}}>
+      <button onClick={()=>setOpen(!open)} style={{width:"100%", display:"flex", justifyContent:"space-between",
+        alignItems:"center", padding:"10px 14px", background:"none", border:"none", color:"var(--accent)",
+        fontWeight:600, fontSize:14, cursor:"pointer"}}>
+        <span>ⓘ Abreviaciones que usa esta bitácora</span>
+        <span>{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div style={{padding:"2px 14px 14px", fontSize:13, lineHeight:1.6, color:"var(--muted)",
+          display:"grid", gridTemplateColumns:"1fr 1fr", gap:"2px 20px"}}>
+          <p><b style={{color:"var(--text)"}}>Carga</b> — peso levantado, en kg.</p>
+          <p><b style={{color:"var(--text)"}}>Reps</b> — repeticiones realizadas.</p>
+          <p><b style={{color:"var(--text)"}}>RIR</b> — Repeticiones en Reserva antes del fallo.</p>
+          <p><b style={{color:"var(--text)"}}>%1RM</b> — % de tu récord de una repetición.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExercisePicker({ejercicios,onPick,onCreate,onClose}){
+  const [q,setQ] = useState("");
+  const filtered = ejercicios.filter(e=>e.nombre.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div onClick={onClose} style={{position:"fixed", inset:0, background:"rgba(0,0,0,.6)",
+      display:"flex", alignItems:"center", justifyContent:"center", zIndex:50, padding:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"var(--surface)", border:"1px solid var(--border)",
+        borderRadius:12, width:"100%", maxWidth:380, maxHeight:"70vh", display:"flex", flexDirection:"column"}}>
+        <div style={{padding:12, borderBottom:"1px solid var(--border)", display:"flex", gap:8}}>
+          <input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar o crear ejercicio…"
+            style={{flex:1, background:"var(--bg)", border:"1px solid var(--border)", borderRadius:6,
+            padding:"8px 10px", color:"var(--text)", fontSize:14, outline:"none"}} />
+          <button onClick={onClose} style={{background:"none", border:"none", color:"var(--muted)", cursor:"pointer", fontSize:18}}>✕</button>
+        </div>
+        <div style={{overflowY:"auto", padding:8}}>
+          {filtered.map(e=>(
+            <button key={e.id} onClick={()=>onPick(e.id)} style={{display:"block", width:"100%", textAlign:"left",
+              padding:"8px 10px", borderRadius:6, background:"none", border:"none", color:"var(--text)",
+              fontSize:14, cursor:"pointer"}}
+              onMouseOver={ev=>ev.currentTarget.style.background="var(--surface2)"}
+              onMouseOut={ev=>ev.currentTarget.style.background="none"}>
+              {e.nombre}
+            </button>
+          ))}
+          {q && !filtered.some(e=>e.nombre.toLowerCase()===q.toLowerCase()) && (
+            <button onClick={()=>onCreate(q)} style={{display:"flex", alignItems:"center", gap:6, width:"100%",
+              textAlign:"left", padding:"8px 10px", borderRadius:6, background:"none", border:"none",
+              color:"var(--accent)", fontSize:14, cursor:"pointer"}}>
+              + Crear "{q}"
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function App(){
+  const [data,setData] = useState(loadData);
+  const [semanaActiva,setSemanaActiva] = useState(data.semanas[0]?.id ?? null);
+  const [legendOpen,setLegendOpen] = useState(false);
+  const [picker,setPicker] = useState(null);
+  const saveTimer = useRef(null);
+
+  useEffect(()=>{
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(()=>saveData(data), 300);
+    return ()=>clearTimeout(saveTimer.current);
+  },[data]);
+
+  const semana = data.semanas.find(s=>s.id===semanaActiva);
+
+  const addSemana = () => {
+    const n = data.semanas.length+1;
+    const nueva = {id:uid(), numero:n, etiqueta:"", dias:[{id:uid(), nombre:"Día 1", acotacion:"", entradas:[]}]};
+    setData({...data, semanas:[...data.semanas, nueva]});
+    setSemanaActiva(nueva.id);
+  };
+  const updateSemana = (semId, patch) => setData({...data, semanas:data.semanas.map(s=>s.id===semId?{...s,...patch}:s)});
+  const deleteSemana = (semId) => {
+    const rest = data.semanas.filter(s=>s.id!==semId);
+    setData({...data, semanas:rest});
+    if(semanaActiva===semId) setSemanaActiva(rest[0]?.id ?? null);
+  };
+  const addDia = () => {
+    const nuevo = {id:uid(), nombre:`Día ${semana.dias.length+1}`, acotacion:"", entradas:[]};
+    updateSemana(semana.id, {dias:[...semana.dias, nuevo]});
+  };
+  const updateDia = (diaId, patch) => updateSemana(semana.id, {dias: semana.dias.map(d=>d.id===diaId?{...d,...patch}:d)});
+  const deleteDia = (diaId) => updateSemana(semana.id, {dias: semana.dias.filter(d=>d.id!==diaId)});
+
+  const addEjercicioCatalogo = (nombre) => {
+    const nuevo = {id:uid(), nombre};
+    setData(prev=>({...prev, ejercicios:[...prev.ejercicios, nuevo]}));
+    return nuevo.id;
+  };
+  const addEntrada = (diaId, ejercicioId) => {
+    const dia = semana.dias.find(d=>d.id===diaId);
+    updateDia(diaId, {entradas:[...dia.entradas, {id:uid(), ejercicioId, nota:"", sets:[EMPTY_SET()]}]});
+  };
+  const updateEntrada = (diaId, entradaId, patch) => {
+    const dia = semana.dias.find(d=>d.id===diaId);
+    updateDia(diaId, {entradas: dia.entradas.map(en=>en.id===entradaId?{...en,...patch}:en)});
+  };
+  const deleteEntrada = (diaId, entradaId) => {
+    const dia = semana.dias.find(d=>d.id===diaId);
+    updateDia(diaId, {entradas: dia.entradas.filter(en=>en.id!==entradaId)});
+  };
+  const nombreEjercicio = (id) => data.ejercicios.find(e=>e.id===id)?.nombre ?? "—";
+  const historialCarga = (ejercicioId) => data.semanas.map(s=>{
+    let max=0;
+    s.dias.forEach(d=>d.entradas.filter(en=>en.ejercicioId===ejercicioId)
+      .forEach(en=>en.sets.forEach(st=>{ max=Math.max(max, Number(st.carga)||0); })));
+    return max;
+  });
+
+  const fieldStyle = {background:"var(--bg)", border:"1px solid var(--border)", borderRadius:5,
+    padding:"6px 8px", color:"var(--text)", fontSize:14, outline:"none", width:"100%"};
+
+  return (
+    <div>
+      <header style={{borderBottom:"1px solid var(--surface2)", padding:"16px 20px", display:"flex", alignItems:"center", gap:12}}>
+        <div style={{width:36, height:36, borderRadius:8, background:"var(--accent)", display:"flex",
+          alignItems:"center", justifyContent:"center", flexShrink:0, color:"var(--bg)", fontWeight:700}}>🏋</div>
+        <div>
+          <h1 className="display" style={{margin:0, fontSize:24, letterSpacing:"0.05em", lineHeight:1}}>Bitácora de Fuerza</h1>
+          <p style={{margin:"2px 0 0", fontSize:12, color:"var(--muted)"}}>Registro y periodización semana a semana</p>
+        </div>
+      </header>
+
+      <main style={{padding:"20px", maxWidth:900, margin:"0 auto", display:"flex", flexDirection:"column", gap:18}}>
+        <Legend open={legendOpen} setOpen={setLegendOpen} />
+
+        <div style={{display:"flex", gap:8, overflowX:"auto", paddingBottom:4}}>
+          {data.semanas.map(s=>(
+            <button key={s.id} onClick={()=>setSemanaActiva(s.id)} style={{flexShrink:0, padding:"8px 14px",
+              borderRadius:6, fontSize:14, cursor:"pointer",
+              background: s.id===semanaActiva ? "var(--accent)" : "var(--surface)",
+              border: `1px solid ${s.id===semanaActiva ? "var(--accent)" : "var(--border)"}`,
+              color: s.id===semanaActiva ? "var(--bg)" : "var(--muted)",
+              fontWeight: s.id===semanaActiva ? 600 : 400}}>
+              Semana {s.numero}{s.etiqueta ? ` · ${s.etiqueta}` : ""}
+            </button>
+          ))}
+          <button onClick={addSemana} style={{flexShrink:0, padding:"8px 12px", borderRadius:6, fontSize:14,
+            background:"none", border:"1px dashed var(--border)", color:"var(--muted)", cursor:"pointer"}}>
+            + Semana
+          </button>
+        </div>
+
+        {semana && (
+          <div style={{display:"flex", flexDirection:"column", gap:18}}>
+            <div style={{background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10,
+              padding:14, display:"flex", flexWrap:"wrap", alignItems:"center", gap:10}}>
+              <label style={{fontSize:12, color:"var(--muted)"}}>Etiqueta del bloque</label>
+              <input value={semana.etiqueta} onChange={e=>updateSemana(semana.id,{etiqueta:e.target.value})}
+                placeholder="p. ej. Acumulación, Intensificación, Descarga…"
+                style={{...fieldStyle, flex:1, minWidth:180}} />
+              {data.semanas.length>1 && (
+                <button onClick={()=>deleteSemana(semana.id)} style={{background:"none", border:"none",
+                  color:"var(--danger)", fontSize:12, cursor:"pointer"}}>Eliminar semana</button>
+              )}
+            </div>
+
+            {semana.dias.map(dia=>(
+              <div key={dia.id} style={{background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden"}}>
+                <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 14px", borderBottom:"1px solid var(--surface2)"}}>
+                  <input value={dia.nombre} onChange={e=>updateDia(dia.id,{nombre:e.target.value})}
+                    style={{background:"none", border:"none", color:"var(--text)", fontWeight:600, fontSize:14, outline:"none", flex:1}} />
+                  {semana.dias.length>1 && (
+                    <button onClick={()=>deleteDia(dia.id)} style={{background:"none", border:"none", color:"var(--muted)", cursor:"pointer"}}>✕</button>
+                  )}
+                </div>
+
+                <div style={{padding:"12px 14px 4px"}}>
+                  <textarea value={dia.acotacion} onChange={e=>updateDia(dia.id,{acotacion:e.target.value})}
+                    placeholder="Acotación del día: cómo te sentiste, sueño, dolores, contexto antes de empezar…"
+                    rows={2} style={{...fieldStyle, resize:"none", fontSize:13, color:"#DADCE1"}} />
+                </div>
+
+                <div style={{padding:14, display:"flex", flexDirection:"column", gap:10}}>
+                  {dia.entradas.map(en=>(
+                    <div key={en.id} style={{border:"1px solid var(--surface2)", borderRadius:8, padding:10, background:"#1A1D21"}}>
+                      <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8}}>
+                        <div style={{display:"flex", alignItems:"center", gap:10}}>
+                          <span style={{fontSize:14, fontWeight:600}}>{nombreEjercicio(en.ejercicioId)}</span>
+                          <Sparkline values={historialCarga(en.ejercicioId)} />
+                        </div>
+                        <button onClick={()=>deleteEntrada(dia.id,en.id)} style={{background:"none", border:"none", color:"var(--muted)", cursor:"pointer"}}>✕</button>
+                      </div>
+                      <input value={en.nota} onChange={e=>updateEntrada(dia.id,en.id,{nota:e.target.value})}
+                        placeholder="Nota del ejercicio (técnica, sensación, ajuste)…"
+                        style={{width:"100%", marginBottom:8, background:"none", border:"none",
+                        borderBottom:"1px solid var(--surface2)", color:"var(--muted)", fontSize:12,
+                        outline:"none", paddingBottom:4}} />
+
+                      <div style={{display:"grid", gridTemplateColumns:"10px repeat(4,1fr) 20px", gap:6,
+                        fontSize:10, textTransform:"uppercase", letterSpacing:"0.03em", color:"var(--muted)",
+                        marginBottom:4}} className="mono">
+                        <span></span><span>Carga kg</span><span>Reps</span><span>RIR</span><span>%1RM</span><span></span>
+                      </div>
+                      {en.sets.map((st,idx)=>(
+                        <div key={st.id} style={{display:"grid", gridTemplateColumns:"10px repeat(4,1fr) 20px",
+                          gap:6, alignItems:"center", marginBottom:5}}>
+                          <span className="mono" style={{fontSize:11, color:"var(--muted)"}}>{idx+1}</span>
+                          {["carga","reps","rir","intensidad"].map(field=>(
+                            <input key={field} value={st[field]??""} inputMode="decimal"
+                              onChange={e=>{
+                                const sets = en.sets.map(s=>s.id===st.id?{...s,[field]:e.target.value}:s);
+                                updateEntrada(dia.id, en.id, {sets});
+                              }}
+                              placeholder={field==="intensidad"?"opc.":"0"}
+                              className="mono" style={{...fieldStyle, padding:"5px 6px", fontSize:13}} />
+                          ))}
+                          <button onClick={()=>{
+                            const sets = en.sets.filter(s=>s.id!==st.id);
+                            updateEntrada(dia.id, en.id, {sets: sets.length?sets:[EMPTY_SET()]});
+                          }} style={{background:"none", border:"none", color:"var(--muted)", cursor:"pointer", justifySelf:"center"}}>✕</button>
+                        </div>
+                      ))}
+                      <button onClick={()=>updateEntrada(dia.id,en.id,{sets:[...en.sets, EMPTY_SET()]})}
+                        style={{marginTop:4, background:"none", border:"none", color:"var(--accent)",
+                        fontSize:12, cursor:"pointer"}}>+ Serie</button>
+                    </div>
+                  ))}
+
+                  <button onClick={()=>setPicker({diaId:dia.id})} style={{width:"100%", border:"1px dashed var(--border)",
+                    borderRadius:8, padding:"9px 0", background:"none", color:"var(--muted)", fontSize:14, cursor:"pointer"}}>
+                    + Añadir ejercicio
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            <button onClick={addDia} style={{width:"100%", border:"1px dashed var(--border)", borderRadius:10,
+              padding:"11px 0", background:"none", color:"var(--muted)", fontSize:14, cursor:"pointer"}}>
+              + Añadir día de entrenamiento a esta semana
+            </button>
+          </div>
+        )}
+      </main>
+
+      {picker && (
+        <ExercisePicker
+          ejercicios={data.ejercicios}
+          onClose={()=>setPicker(null)}
+          onPick={(id)=>{ addEntrada(picker.diaId, id); setPicker(null); }}
+          onCreate={(nombre)=>{ const id=addEjercicioCatalogo(nombre); addEntrada(picker.diaId, id); setPicker(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>
